@@ -1,0 +1,4 @@
+[submodule "res/core"]
+	path = res/core
+	branch = develop
+	url = ssh://dev.res-it.net:29418/res-service-core
