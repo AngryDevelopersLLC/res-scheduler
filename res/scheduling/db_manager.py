@@ -16,7 +16,7 @@ class DBManager(Logger):
             "scheduled_tasks", sa.MetaData(),
             sa.Column("id", sa.BigInteger(), primary_key=True),
             sa.Column("data", BYTEA()),
-            sa.Column("expires", sa.Boolean(), default=False),
+            sa.Column("expire_in", sa.SmallInteger(), default=None),
             sa.Column("due_date", sa.Time(timezone=True)))
 
     @asyncio.coroutine
@@ -36,13 +36,13 @@ class DBManager(Logger):
         yield from self._engine.wait_closed()
 
     @asyncio.coroutine
-    def register_task(self, data, due_date, expires):
+    def register_task(self, data, due_date, expire_in):
         self.debug("register_task: %d bytes -> %s",
                    len(data), due_date)
         with (yield from self._engine) as conn:
             row = yield from conn.execute(
                 self._tasks_table.insert()
-                .values(data=data, expires=expires, due_date=due_date))
+                .values(data=data, expire_in=expire_in, due_date=due_date))
             return (yield from row.first()).id
 
     @asyncio.coroutine

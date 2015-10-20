@@ -33,7 +33,6 @@ class Worker(Logger):
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
     POLL_INTERVAL = 60
-    EXPIRITY_PERIOD = timedelta(hours=1)
 
     def __init__(self, db_manager, heap, cfg, poll_interval=POLL_INTERVAL):
         super(Worker, self).__init__()
@@ -91,13 +90,14 @@ class Worker(Logger):
         tasks = []
         with (yield from self._heap_lock):
             while self._heap.size() > 0 and self._heap.min()[0] < now:
-                due_date, (task_id, data, expires) = self._heap.pop()
-                if expires and (now - due_date) > self.EXPIRITY_PERIOD:
+                due_date, (task_id, data, expire_in) = self._heap.pop()
+                if expire_in is not None and \
+                        (now - due_date) > timedelta(hours=expire_in):
                     self.warning("Dropped task scheduled on %s: %s",
                                  due_date, data)
                     continue
                 self.info("Trigger: %s -> %s", due_date, data)
-                self._pending_tasks[task_id] = due_date, expires, data
+                self._pending_tasks[task_id] = due_date, expire_in, data
                 tasks.append(task_id)
         for task_id in tasks:
             yield from self._trigger(task_id)
@@ -105,9 +105,9 @@ class Worker(Logger):
 
     @asyncio.coroutine
     def _trigger(self, task_id):
-        _, _, data = self._pending_tasks[task_id]
+        due_date, _, data = self._pending_tasks[task_id]
         yield from self._amqp_channel_trigger.publish(
-            json.dumps(data, default=json_default).encode("utf-8"),
+            json.dumps((due_date, data), default=json_default).encode("utf-8"),
             "", self._queue_trigger_name, properties=self.MESSAGE_PROPERTIES)
 
     @asyncio.coroutine
@@ -223,7 +223,11 @@ class Worker(Logger):
             yield from reply_error("failed to parse JSON")
             return
 
-        expires = data.get("expires", False)
+        expire_in = data.get("expire_in", None)
+        if expire_in is not None and (expire_in > 32767 or expire_in < 0):
+            self.error("%s: expire_in must be >=0 and <= 32767", dtag)
+            yield from reply_error("expire_in must be >=0 and <= 32767")
+            return
         try:
             due_date = data["due_date"]
             data = data["data"]
@@ -236,9 +240,9 @@ class Worker(Logger):
             yield from reply_error("due_date must be a datetime object")
             return
         task_id = yield from self._db_manager.register_task(
-            data, due_date, expires)
+            data, due_date, expire_in)
         with (yield from self._heap_lock):
-            self._heap.push(due_date, (task_id, data, expires))
+            self._heap.push(due_date, (task_id, data, expire_in))
         yield from reply({"status": "ok", "size": self._heap.size()})
 
     @asyncio.coroutine
@@ -268,13 +272,13 @@ class Worker(Logger):
             self.error("%s: %s is not a valid pending task identifier", dtag,
                        task_id)
             return
-        due_date, expires, data = self._pending_tasks[task_id]
+        due_date, expire_in, data = self._pending_tasks[task_id]
         if status != "ok":
             self.warning("%s: task %s was reported to be in status %s",
                          dtag, task_id, status)
             if status != "giveup":
                 with (yield from self._heap_lock):
-                    self._heap.push(due_date, (task_id, data, expires))
+                    self._heap.push(due_date, (task_id, data, expire_in))
                 return
         yield from self._db_manager.unregister_task(task_id)
         self.info("Task %s was fulfilled (%s)", task_id, dtag)

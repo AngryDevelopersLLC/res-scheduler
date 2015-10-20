@@ -42,7 +42,7 @@ class PropertiesMock(object):
     reply_to = "amq.rabbitmq.reply-to"
 
 
-class AccountingAPITest(unittest.TestCase):
+class SchedulingAPITest(unittest.TestCase):
     @staticmethod
     def setUpClass():
         Logger.setup_logging(logging.DEBUG)
@@ -76,7 +76,7 @@ class AccountingAPITest(unittest.TestCase):
         self.assertEqual(date, worker._heap.min()[0])
         self.assertEqual("test_task_id1", worker._heap.min()[1][0])
         self.assertEqual("hello", worker._heap.min()[1][1])
-        self.assertEqual(False, worker._heap.min()[1][2])
+        self.assertEqual(None, worker._heap.min()[1][2])
         date -= timedelta(days=10)
         msg = {"due_date": date, "data": "world"}
         msg_data = make_msg_bytes(msg)
@@ -86,9 +86,9 @@ class AccountingAPITest(unittest.TestCase):
         self.assertEqual(date, worker._heap.min()[0])
         self.assertEqual("test_task_id2", worker._heap.min()[1][0])
         self.assertEqual("world", worker._heap.min()[1][1])
-        self.assertEqual(False, worker._heap.min()[1][2])
+        self.assertEqual(None, worker._heap.min()[1][2])
         date += timedelta(days=5)
-        msg = {"due_date": date, "data": "other", "expires": True}
+        msg = {"due_date": date, "data": "other", "expire_in": 1}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
@@ -97,7 +97,7 @@ class AccountingAPITest(unittest.TestCase):
         self.assertEqual(date, worker._heap._list[2][0])
         self.assertEqual("test_task_id3", worker._heap._list[2][1][0])
         self.assertEqual("other", worker._heap._list[2][1][1])
-        self.assertEqual(True, worker._heap._list[2][1][2])
+        self.assertEqual(1, worker._heap._list[2][1][2])
         yield from worker._poll_async()
         self.assertEqual(0, worker._heap.size())
         self.assertEqual(2, len(worker._amqp_channel_trigger.published))
