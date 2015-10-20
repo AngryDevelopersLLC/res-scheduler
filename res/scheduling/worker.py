@@ -1,10 +1,10 @@
-# RES Accounting Service
+# RES Scheduling Service
 # Copyright © 2015 InvestGroup, LLC
-from datetime import datetime, timedelta
 
 import aioamqp
 import asyncio
-from bson import json_util
+from asyncio_mongo._bson import json_util
+from datetime import datetime, timedelta
 import json
 import pytz
 import requests
@@ -12,6 +12,9 @@ import socket
 
 from res.core.logger import Logger
 from res.core.utils import ellipsis, dameraulevenshtein
+
+json_default = json_util.default
+json_hook = json_util.object_hook
 
 
 class AMQPServerError(Exception):
@@ -48,6 +51,7 @@ class Worker(Logger):
         self._poll_interval = poll_interval
         self._poll_handle = None
         self._reconnect_amqp_task = None
+        self._pending_tasks = {}
 
     @asyncio.coroutine
     def initialize(self):
@@ -61,7 +65,10 @@ class Worker(Logger):
         loop = asyncio.get_event_loop()
         self._poll_handle = loop.call_later(self._poll_interval, self._poll)
         yield from self._amqp_channel_source.basic_consume(
-            self._cfg.channel.queue_source, callback=self._amqp_callback,
+            self._cfg.channel.queue_source,
+            callback=self._amqp_callback_source, no_ack=True)
+        yield from self._amqp_channel_trigger.basic_consume(
+            "amq.rabbitmq.reply-to", callback=self._amqp_callback_trigger,
             no_ack=True)
         self.info("Entered working mode")
 
@@ -81,21 +88,26 @@ class Worker(Logger):
     def _poll_async(self):
         now = datetime.now(pytz.utc)
         loop = asyncio.get_event_loop()
+        tasks = []
         with (yield from self._heap_lock):
             while self._heap.min[0] < now:
-                due_date, expires, data = self._heap.pop()
+                due_date, (task_id, data, expires) = self._heap.pop()
                 if expires and (now - due_date) > self.EXPIRITY_PERIOD:
                     self.warning("Dropped task scheduled on %s: %s",
                                  due_date, data)
                     continue
                 self.info("Trigger: %s -> %s", due_date, data)
-                yield from self._trigger(data)
+                self._pending_tasks[task_id] = due_date, expires, data
+                tasks.append(task_id)
+        for task_id in tasks:
+            yield from self._trigger(task_id)
         self._poll_handle = loop.call_later(self._poll_interval, self._poll)
 
     @asyncio.coroutine
-    def _trigger(self, data):
+    def _trigger(self, task_id):
+        _, _, data = self._pending_tasks[task_id]
         yield from self._amqp_channel_trigger.publish(
-            json.dumps(data, default=json_util.default).encode("utf-8"),
+            json.dumps(data, default=json_default).encode("utf-8"),
             "", self._queue_trigger_name, properties=self.MESSAGE_PROPERTIES)
 
     @asyncio.coroutine
@@ -172,7 +184,7 @@ class Worker(Logger):
                 (virtualhost, vhosts, distances[0][1]))
 
     @asyncio.coroutine
-    def _amqp_callback(self, body, envelope, properties):
+    def _amqp_callback_source(self, body, envelope, properties):
         @asyncio.coroutine
         def reply(obj=None):
             if obj is None:
@@ -180,7 +192,7 @@ class Worker(Logger):
             if "status" not in obj:
                 obj["status"] = "ok"
             yield from self._amqp_channel_source.publish(
-                json.dumps(obj, default=json_util.default).encode("utf-8"), "",
+                json.dumps(obj, default=json_default).encode("utf-8"), "",
                 properties.reply_to, properties=self.MESSAGE_PROPERTIES)
 
         @asyncio.coroutine
@@ -205,20 +217,64 @@ class Worker(Logger):
             return
 
         try:
-            data = json.loads(body.decode("utf-8"))
+            data = json.loads(body.decode("utf-8"), object_hook=json_hook)
         except ValueError:
             self.error("%s: failed to parse %s%s", dtag, *ellipsis(body))
             yield from reply_error("failed to parse JSON")
             return
 
+        expires = data.get("expires", False)
         try:
             due_date = data["due_date"]
             data = data["data"]
-        except KeyError as e:
+        except (KeyError, ValueError) as e:
             self.error("%s: invalid format: %s", dtag, e)
             yield from reply_error("invalid format of the message: %s" % e)
             return
-        expires = data.get("expires", False)
-        yield from self._db_manager.register_task(data, due_date, expires)
+        if not isinstance(due_date, datetime):
+            self.error("%s: due_date must be a datetime object", dtag)
+            yield from reply_error("due_date must be a datetime object")
+            return
+        task_id = yield from self._db_manager.register_task(
+            data, due_date, expires)
         with (yield from self._heap_lock):
-            self._heap.push(due_date, (data, expires))
+            self._heap.push(due_date, (task_id, data, expires))
+        yield from reply({"status": "ok", "size": self._heap.size()})
+
+    @asyncio.coroutine
+    def _amqp_callback_trigger(self, body, envelope, properties):
+        dtag = envelope.delivery_tag
+        if len(body) > self.MAX_MESSAGE_SIZE:
+            self.error("%s: max message length exceeded (%d > %d)",
+                       dtag, len(body), self.MAX_MESSAGE_SIZE)
+            return
+        if properties.content_type != "application/json" or \
+                properties.content_encoding != "utf-8":
+            self.error("%s: invalid/missing content_type or content_encoding",
+                       dtag)
+            return
+        try:
+            data = json.loads(body.decode("utf-8"), object_hook=json_hook)
+        except ValueError:
+            self.error("%s: failed to parse %s%s", dtag, *ellipsis(body))
+            return
+        try:
+            task_id = data["task"]
+            status = data["status"]
+        except KeyError as e:
+            self.error("%s: invalid format: %s", dtag, e)
+            return
+        if task_id not in self._pending_tasks:
+            self.error("%s: %s is not a valid pending task identifier", dtag,
+                       task_id)
+            return
+        due_date, expires, data = self._pending_tasks[task_id]
+        if status != "ok":
+            self.warning("%s: task %s was reported to be in status %s",
+                         dtag, task_id, status)
+            if status != "giveup":
+                with (yield from self._heap_lock):
+                    self._heap.push(due_date, (task_id, data, expires))
+                return
+        yield from self._db_manager.unregister_task(task_id)
+        self.info("Task %s was fulfilled (%s)", task_id, dtag)
