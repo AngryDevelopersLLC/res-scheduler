@@ -90,7 +90,7 @@ class Worker(Logger):
         loop = asyncio.get_event_loop()
         tasks = []
         with (yield from self._heap_lock):
-            while self._heap.min[0] < now:
+            while self._heap.size() > 0 and self._heap.min()[0] < now:
                 due_date, (task_id, data, expires) = self._heap.pop()
                 if expires and (now - due_date) > self.EXPIRITY_PERIOD:
                     self.warning("Dropped task scheduled on %s: %s",

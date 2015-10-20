@@ -5,6 +5,7 @@ import json
 import logging
 import unittest
 import pytz
+from random import randint
 
 from res.core.configuration import Config
 from res.core.logger import Logger
@@ -13,15 +14,22 @@ from res.scheduling.worker import Worker
 
 
 class DBManagerMock(object):
+    def __init__(self):
+        self.counter = 0
+
     @asyncio.coroutine
     def register_task(self, data, due_date, expires):
-        return "test_task_id"
+        self.counter += 1
+        return "test_task_id%d" % self.counter
 
 
 class AMQPChannelMock(object):
+    def __init__(self):
+        self.published = []
+
     @asyncio.coroutine
     def publish(self, *args, **kwargs):
-        pass
+        self.published.append((args, kwargs))
 
 
 class EnvelopeMock(object):
@@ -56,15 +64,44 @@ class AccountingAPITest(unittest.TestCase):
         worker._amqp_channel_trigger = AMQPChannelMock()
         date = datetime.now(pytz.utc)
         date -= timedelta(microseconds=date.microsecond % 1000)
+
+        def make_msg_bytes(msg):
+            return json.dumps(msg, default=json_util.default).encode("utf-8")
+
         msg = {"due_date": date, "data": "hello"}
-        msg_data = json.dumps(msg, default=json_util.default).encode("utf-8")
+        msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(1, worker._heap.size())
         self.assertEqual(date, worker._heap.min()[0])
-        self.assertEqual("test_task_id", worker._heap.min()[1][0])
+        self.assertEqual("test_task_id1", worker._heap.min()[1][0])
         self.assertEqual("hello", worker._heap.min()[1][1])
         self.assertEqual(False, worker._heap.min()[1][2])
+        date -= timedelta(days=10)
+        msg = {"due_date": date, "data": "world"}
+        msg_data = make_msg_bytes(msg)
+        yield from worker._amqp_callback_source(
+            msg_data, EnvelopeMock(), PropertiesMock())
+        self.assertEqual(2, worker._heap.size())
+        self.assertEqual(date, worker._heap.min()[0])
+        self.assertEqual("test_task_id2", worker._heap.min()[1][0])
+        self.assertEqual("world", worker._heap.min()[1][1])
+        self.assertEqual(False, worker._heap.min()[1][2])
+        date += timedelta(days=5)
+        msg = {"due_date": date, "data": "other", "expires": True}
+        msg_data = make_msg_bytes(msg)
+        yield from worker._amqp_callback_source(
+            msg_data, EnvelopeMock(), PropertiesMock())
+        self.assertEqual(3, worker._heap.size())
+        self.assertEqual("world", worker._heap.min()[1][1])
+        self.assertEqual(date, worker._heap._list[2][0])
+        self.assertEqual("test_task_id3", worker._heap._list[2][1][0])
+        self.assertEqual("other", worker._heap._list[2][1][1])
+        self.assertEqual(True, worker._heap._list[2][1][2])
+        yield from worker._poll_async()
+        self.assertEqual(0, worker._heap.size())
+        self.assertEqual(2, len(worker._amqp_channel_trigger.published))
+        self.assertEqual(2, len(worker._pending_tasks))
 
 
 if __name__ == "__main__":
