@@ -1,4 +1,5 @@
 import asyncio
+import pickle
 import aiopg.sa
 from psycopg2 import ProgrammingError
 import sqlalchemy as sa
@@ -17,7 +18,7 @@ class DBManager(Logger):
             sa.Column("id", sa.BigInteger(), primary_key=True),
             sa.Column("data", BYTEA()),
             sa.Column("expire_in", sa.SmallInteger(), default=None),
-            sa.Column("due_date", sa.Time(timezone=True)))
+            sa.Column("due_date", sa.DateTime(timezone=True)))
 
     @asyncio.coroutine
     def initialize(self):
@@ -42,7 +43,9 @@ class DBManager(Logger):
         with (yield from self._engine) as conn:
             row = yield from conn.execute(
                 self._tasks_table.insert()
-                .values(data=data, expire_in=expire_in, due_date=due_date))
+                .values(data=pickle.dumps(data),
+                        expire_in=expire_in,
+                        due_date=due_date))
             return (yield from row.first()).id
 
     @asyncio.coroutine
@@ -54,4 +57,6 @@ class DBManager(Logger):
     def fetch_all(self):
         with (yield from self._engine) as conn:
             rows = yield from conn.execute(self._tasks_table.select())
-            return [(r.due_date, (r.expires. r.data)) for r in rows.fetchall()]
+            rows = yield from rows.fetchall()
+            return [(r.due_date, (r.expire_in, pickle.loads(r.data)))
+                    for r in rows]

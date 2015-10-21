@@ -32,7 +32,7 @@ class Worker(Logger):
     }
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
-    POLL_INTERVAL = 60
+    POLL_INTERVAL = 10
 
     def __init__(self, db_manager, heap, cfg, poll_interval=POLL_INTERVAL):
         super(Worker, self).__init__()
@@ -51,6 +51,7 @@ class Worker(Logger):
         self._poll_handle = None
         self._reconnect_amqp_task = None
         self._pending_tasks = {}
+        self.info("Initial heap size: %d", heap.size())
 
     @asyncio.coroutine
     def initialize(self):
@@ -106,9 +107,11 @@ class Worker(Logger):
     @asyncio.coroutine
     def _trigger(self, task_id):
         due_date, _, data = self._pending_tasks[task_id]
+        props = dict(self.MESSAGE_PROPERTIES)
+        props["reply-to"] = "amq.rabbitmq.reply-to"
         yield from self._amqp_channel_trigger.publish(
             json.dumps((due_date, data), default=json_default).encode("utf-8"),
-            "", self._queue_trigger_name, properties=self.MESSAGE_PROPERTIES)
+            "", self._queue_trigger_name, properties=props)
 
     @asyncio.coroutine
     def _reconnect_amqp(self):
