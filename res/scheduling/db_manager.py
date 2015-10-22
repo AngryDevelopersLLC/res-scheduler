@@ -51,12 +51,13 @@ class DBManager(Logger):
     @asyncio.coroutine
     def unregister_task(self, id_):
         with (yield from self._engine) as conn:
-            yield from conn.execute(self._tasks_table.delete().where(id=id_))
+            yield from conn.execute(self._tasks_table.delete().where(
+                self._tasks_table.c.id == id_))
 
     @asyncio.coroutine
     def fetch_all(self):
         with (yield from self._engine) as conn:
             rows = yield from conn.execute(self._tasks_table.select())
             rows = yield from rows.fetchall()
-            return [(r.due_date, (r.expire_in, pickle.loads(r.data)))
+            return [(r.due_date, (r.id, r.expire_in, pickle.loads(r.data)))
                     for r in rows]

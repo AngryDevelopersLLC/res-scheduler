@@ -32,9 +32,8 @@ class Worker(Logger):
     }
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
-    POLL_INTERVAL = 10
 
-    def __init__(self, db_manager, heap, cfg, poll_interval=POLL_INTERVAL):
+    def __init__(self, db_manager, heap, cfg, poll_interval=None):
         super(Worker, self).__init__()
         self._db_manager = db_manager
         self._amqp_transport = None
@@ -47,7 +46,8 @@ class Worker(Logger):
         self._heap_lock = asyncio.Lock()
         self._heap = heap
         self._cfg = cfg
-        self._poll_interval = poll_interval
+        self._poll_interval = cfg.scheduler.poll_interval \
+            if poll_interval is None else poll_interval
         self._poll_handle = None
         self._reconnect_amqp_task = None
         self._pending_tasks = {}
@@ -87,11 +87,12 @@ class Worker(Logger):
     @asyncio.coroutine
     def _poll_async(self):
         now = datetime.now(pytz.utc)
+        self.debug("Poll started at %s", now)
         loop = asyncio.get_event_loop()
         tasks = []
         with (yield from self._heap_lock):
             while self._heap.size() > 0 and self._heap.min()[0] < now:
-                due_date, (task_id, data, expire_in) = self._heap.pop()
+                due_date, (task_id, expire_in, data) = self._heap.pop()
                 if expire_in is not None and \
                         (now - due_date) > timedelta(hours=expire_in):
                     self.warning("Dropped task scheduled on %s: %s",
@@ -108,9 +109,11 @@ class Worker(Logger):
     def _trigger(self, task_id):
         due_date, _, data = self._pending_tasks[task_id]
         props = dict(self.MESSAGE_PROPERTIES)
-        props["reply-to"] = "amq.rabbitmq.reply-to"
+        props["reply_to"] = "amq.rabbitmq.reply-to"
+        msg = task_id, due_date, data
+        self.debug("trigger -> %s", msg)
         yield from self._amqp_channel_trigger.publish(
-            json.dumps((due_date, data), default=json_default).encode("utf-8"),
+            json.dumps(msg, default=json_default).encode("utf-8"),
             "", self._queue_trigger_name, properties=props)
 
     @asyncio.coroutine
@@ -194,6 +197,7 @@ class Worker(Logger):
                 obj = {}
             if "status" not in obj:
                 obj["status"] = "ok"
+            self.debug("source -> %s", obj)
             yield from self._amqp_channel_source.publish(
                 json.dumps(obj, default=json_default).encode("utf-8"), "",
                 properties.reply_to, properties=self.MESSAGE_PROPERTIES)
@@ -226,6 +230,7 @@ class Worker(Logger):
             yield from reply_error("failed to parse JSON")
             return
 
+        self.debug("source <- [%s] %s", dtag, data)
         expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
@@ -235,7 +240,7 @@ class Worker(Logger):
             due_date = data["due_date"]
             data = data["data"]
         except (KeyError, ValueError) as e:
-            self.error("%s: invalid format: %s", dtag, e)
+            self.error("%s: invalid format: %s: %s", dtag, type(e), e)
             yield from reply_error("invalid format of the message: %s" % e)
             return
         if not isinstance(due_date, datetime):
@@ -245,7 +250,7 @@ class Worker(Logger):
         task_id = yield from self._db_manager.register_task(
             data, due_date, expire_in)
         with (yield from self._heap_lock):
-            self._heap.push(due_date, (task_id, data, expire_in))
+            self._heap.push(due_date, (task_id, expire_in, data))
         yield from reply({"status": "ok", "size": self._heap.size()})
 
     @asyncio.coroutine
@@ -265,11 +270,13 @@ class Worker(Logger):
         except ValueError:
             self.error("%s: failed to parse %s%s", dtag, *ellipsis(body))
             return
+        self.debug("trigger <- [%s] %s", dtag, data)
         try:
             task_id = data["task"]
+            node_id = data["node_id"]
             status = data["status"]
         except KeyError as e:
-            self.error("%s: invalid format: %s", dtag, e)
+            self.error("%s: invalid format: %s: %s", dtag, type(e), e)
             return
         if task_id not in self._pending_tasks:
             self.error("%s: %s is not a valid pending task identifier", dtag,
@@ -281,7 +288,7 @@ class Worker(Logger):
                          dtag, task_id, status)
             if status != "giveup":
                 with (yield from self._heap_lock):
-                    self._heap.push(due_date, (task_id, data, expire_in))
+                    self._heap.push(due_date, (task_id, expire_in, data))
                 return
         yield from self._db_manager.unregister_task(task_id)
-        self.info("Task %s was fulfilled (%s)", task_id, dtag)
+        self.info("%s: task %s was fulfilled by %s", dtag, task_id, node_id)
