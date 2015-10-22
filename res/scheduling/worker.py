@@ -33,7 +33,7 @@ class Worker(Logger):
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
 
-    def __init__(self, db_manager, heap, cfg, poll_interval=None):
+    def __init__(self, db_manager, heap, cfg, poll_interval):
         super(Worker, self).__init__()
         self._db_manager = db_manager
         self._amqp_transport = None
@@ -46,8 +46,7 @@ class Worker(Logger):
         self._heap_lock = asyncio.Lock()
         self._heap = heap
         self._cfg = cfg
-        self._poll_interval = cfg.scheduler.poll_interval \
-            if poll_interval is None else poll_interval
+        self._poll_interval = poll_interval
         self._poll_handle = None
         self._reconnect_amqp_task = None
         self._pending_tasks = {}
