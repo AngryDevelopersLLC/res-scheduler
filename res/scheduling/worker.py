@@ -33,7 +33,7 @@ class Worker(Logger):
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
 
-    def __init__(self, db_manager, heap, cfg, poll_interval):
+    def __init__(self, db_manager, heap, cfg, poll_interval, default_timeout):
         super(Worker, self).__init__()
         self._db_manager = db_manager
         self._amqp_transport = None
@@ -43,13 +43,14 @@ class Worker(Logger):
         self._queue_trigger_name = None
         self._stopped = False
         self._working = False
-        self._heap_lock = asyncio.Lock()
         self._heap = heap
         self._cfg = cfg
+        self._default_timeout = default_timeout
         self._poll_interval = poll_interval
         self._poll_handle = None
         self._reconnect_amqp_task = None
         self._pending_tasks = {}
+        self._timed_out_tasks = set()
         self.info("Initial heap size: %d", heap.size())
 
     @asyncio.coroutine
@@ -80,33 +81,46 @@ class Worker(Logger):
         self._reconnect_amqp_task.cancel()
 
     def _poll(self):
-        loop = asyncio.get_event_loop()
-        loop.create_task(self._poll_async())
-
-    @asyncio.coroutine
-    def _poll_async(self):
         now = datetime.now(pytz.utc)
-        self.debug("Poll started at %s", now)
+        self.debug("Poll at %s", now)
         loop = asyncio.get_event_loop()
         tasks = []
-        with (yield from self._heap_lock):
-            while self._heap.size() > 0 and self._heap.min()[0] < now:
-                due_date, (task_id, expire_in, data) = self._heap.pop()
-                if expire_in is not None and \
-                        (now - due_date) > timedelta(hours=expire_in):
-                    self.warning("Dropped task scheduled on %s: %s",
-                                 due_date, data)
-                    continue
-                self.info("Trigger: %s -> %s", due_date, data)
-                self._pending_tasks[task_id] = due_date, expire_in, data
-                tasks.append(task_id)
+        # Detect timed out tasks
+        timed_out = []
+        for task_id, (trigger_date, due_date, expire_in, timeout, data) in \
+                self._pending_tasks.items():
+            if now > (trigger_date + timedelta(seconds=timeout)):
+                self._heap.push(due_date, (task_id, expire_in, timeout, data))
+                timed_out.append(task_id)
+                self._timed_out_tasks.add(task_id)
+                self.warning(
+                    "Task %s scheduled at %s, triggered at %s: timeout %s "
+                    "seconds was exceeded", task_id, due_date, trigger_date,
+                    timeout)
+        for task_id in timed_out:
+            del self._pending_tasks[task_id]
+        # Trigger tasks
+        while self._heap.size() > 0 and self._heap.min()[0] < now:
+            due_date, (task_id, expire_in, timeout, data) = self._heap.pop()
+            if expire_in is not None and \
+                    (now - due_date) > timedelta(hours=expire_in):
+                self.warning("Dropped task scheduled on %s: %s",
+                             due_date, data)
+                continue
+            self.info("Trigger: %s -> %s", due_date, data)
+            self._pending_tasks[task_id] = \
+                now, due_date, expire_in, timeout, data
+            tasks.append(task_id)
+        loop = asyncio.get_event_loop()
+        task_aio_tasks = []
         for task_id in tasks:
-            yield from self._trigger(task_id)
+            task_aio_tasks.append(loop.create_task(self._trigger(task_id)))
         self._poll_handle = loop.call_later(self._poll_interval, self._poll)
+        return task_aio_tasks
 
     @asyncio.coroutine
     def _trigger(self, task_id):
-        due_date, _, data = self._pending_tasks[task_id]
+        _, due_date, _, _, data = self._pending_tasks[task_id]
         props = dict(self.MESSAGE_PROPERTIES)
         props["reply_to"] = "amq.rabbitmq.reply-to"
         msg = task_id, due_date, data
@@ -231,6 +245,9 @@ class Worker(Logger):
 
         self.debug("source <- [%s] %s", dtag, data)
         expire_in = data.get("expire_in", None)
+        timeout = data.get("timeout", None)
+        if timeout is None:
+            timeout = self._default_timeout
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
             yield from reply_error("expire_in must be >=0 and <= 32767")
@@ -247,10 +264,10 @@ class Worker(Logger):
             yield from reply_error("due_date must be a datetime object")
             return
         task_id = yield from self._db_manager.register_task(
-            data, due_date, expire_in)
-        with (yield from self._heap_lock):
-            self._heap.push(due_date, (task_id, expire_in, data))
-        yield from reply({"status": "ok", "size": self._heap.size()})
+            data, due_date, expire_in, timeout)
+        self._heap.push(due_date, (task_id, expire_in, timeout, data))
+        yield from reply({"status": "ok", "size": self._heap.size(),
+                          "timeout": max(timeout, self._poll_interval)})
 
     @asyncio.coroutine
     def _amqp_callback_trigger(self, body, envelope, properties):
@@ -278,16 +295,21 @@ class Worker(Logger):
             self.error("%s: invalid format: %s: %s", dtag, type(e), e)
             return
         if task_id not in self._pending_tasks:
-            self.error("%s: %s is not a valid pending task identifier", dtag,
-                       task_id)
+            if task_id in self._timed_out_tasks:
+                self.error(
+                    "Received status %s from timed out task %s from %s => "
+                    "double trigger", status, task_id, node_id)
+            else:
+                self.error("%s: %s is not a valid pending task identifier",
+                           dtag, task_id)
             return
-        due_date, expire_in, data = self._pending_tasks[task_id]
+        _, due_date, expire_in, timeout, data = \
+            self._pending_tasks.pop(task_id)
         if status != "ok":
             self.warning("%s: task %s was reported to be in status %s",
                          dtag, task_id, status)
             if status != "giveup":
-                with (yield from self._heap_lock):
-                    self._heap.push(due_date, (task_id, expire_in, data))
+                self._heap.push(due_date, (task_id, expire_in, timeout, data))
                 return
         yield from self._db_manager.unregister_task(task_id)
         self.info("%s: task %s was fulfilled by %s", dtag, task_id, node_id)
