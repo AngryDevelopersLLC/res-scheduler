@@ -38,7 +38,7 @@ class DBManager(Logger):
         yield from self._engine.wait_closed()
 
     @asyncio.coroutine
-    def register_task(self, data, due_date, expire_in, timeout):
+    def register_task(self, data, due_date, expire_in, timeout, name):
         self.debug("register_task: %d bytes -> %s",
                    len(data), due_date)
         with (yield from self._engine) as conn:
@@ -47,7 +47,8 @@ class DBManager(Logger):
                 .values(data=pickle.dumps(data),
                         expire_in=expire_in,
                         timeout=timeout,
-                        due_date=due_date))
+                        due_date=due_date,
+                        name=name))
             return (yield from row.first()).id
 
     @asyncio.coroutine
@@ -61,6 +62,6 @@ class DBManager(Logger):
         with (yield from self._engine) as conn:
             rows = yield from conn.execute(self._tasks_table.select())
             rows = yield from rows.fetchall()
-            return [(r.due_date, (r.id, r.expire_in, r.timeout,
+            return [(r.due_date, (r.name, r.id, r.expire_in, r.timeout,
                                   pickle.loads(r.data)))
                     for r in rows]

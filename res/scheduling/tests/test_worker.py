@@ -18,7 +18,7 @@ class DBManagerMock(object):
         self.counter = 0
 
     @asyncio.coroutine
-    def register_task(self, data, due_date, expires, timeout):
+    def register_task(self, data, due_date, expires, timeout, uid):
         self.counter += 1
         return "test_task_id%d" % self.counter
 
@@ -75,30 +75,33 @@ class SchedulingAPITest(unittest.TestCase):
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(1, worker._heap.size())
         self.assertEqual(date, worker._heap.min()[0])
-        self.assertEqual("test_task_id1", worker._heap.min()[1][0])
-        self.assertEqual(None, worker._heap.min()[1][1])
-        self.assertEqual("hello", worker._heap.min()[1][3])
+        self.assertIsNone(worker._heap.min()[1][0])
+        self.assertEqual("test_task_id1", worker._heap.min()[1][1])
+        self.assertEqual(None, worker._heap.min()[1][2])
+        self.assertEqual("hello", worker._heap.min()[1][4])
         date -= timedelta(days=10)
-        msg = {"due_date": date, "data": "world"}
+        msg = {"due_date": date, "data": "world", "id": "unique"}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(2, worker._heap.size())
         self.assertEqual(date, worker._heap.min()[0])
-        self.assertEqual("test_task_id2", worker._heap.min()[1][0])
-        self.assertEqual(None, worker._heap.min()[1][1])
-        self.assertEqual("world", worker._heap.min()[1][3])
+        self.assertEqual("unique", worker._heap.min()[1][0])
+        self.assertEqual("test_task_id2", worker._heap.min()[1][1])
+        self.assertEqual(None, worker._heap.min()[1][2])
+        self.assertEqual("world", worker._heap.min()[1][4])
         date += timedelta(days=5)
         msg = {"due_date": date, "data": "other", "expire_in": 1}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(3, worker._heap.size())
-        self.assertEqual("world", worker._heap.min()[1][3])
+        self.assertEqual("world", worker._heap.min()[1][4])
         self.assertEqual(date, worker._heap._list[2][0])
-        self.assertEqual("test_task_id3", worker._heap._list[2][1][0])
-        self.assertEqual(1, worker._heap._list[2][1][1])
-        self.assertEqual("other", worker._heap._list[2][1][3])
+        self.assertIsNone(worker._heap._list[2][1][0])
+        self.assertEqual("test_task_id3", worker._heap._list[2][1][1])
+        self.assertEqual(1, worker._heap._list[2][1][2])
+        self.assertEqual("other", worker._heap._list[2][1][4])
         tasks = worker._poll()
         for task in tasks:
             yield from task

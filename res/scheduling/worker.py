@@ -3,6 +3,7 @@
 
 import aioamqp
 import asyncio
+from bidict import bidict
 from asyncio_mongo._bson import json_util
 from datetime import datetime, timedelta
 import json
@@ -44,6 +45,7 @@ class Worker(Logger):
         self._stopped = False
         self._working = False
         self._heap = heap
+        self._unique_tasks = bidict()
         self._cfg = cfg
         self._default_timeout = default_timeout
         self._poll_interval = poll_interval
@@ -87,10 +89,11 @@ class Worker(Logger):
         tasks = []
         # Detect timed out tasks
         timed_out = []
-        for task_id, (trigger_date, due_date, expire_in, timeout, data) in \
-                self._pending_tasks.items():
+        for task_id, (trigger_date, due_date, expire_in, timeout, uid, data) \
+                in self._pending_tasks.items():
             if now > (trigger_date + timedelta(seconds=timeout)):
-                self._heap.push(due_date, (task_id, expire_in, timeout, data))
+                self._heap.push(due_date, (uid, task_id, expire_in, timeout,
+                                           data))
                 timed_out.append(task_id)
                 self._timed_out_tasks.add(task_id)
                 self.warning(
@@ -101,7 +104,8 @@ class Worker(Logger):
             del self._pending_tasks[task_id]
         # Trigger tasks
         while self._heap.size() > 0 and self._heap.min()[0] < now:
-            due_date, (task_id, expire_in, timeout, data) = self._heap.pop()
+            due_date, (uid, task_id, expire_in, timeout, data) = \
+                self._heap.pop()
             if expire_in is not None and \
                     (now - due_date) > timedelta(hours=expire_in):
                 self.warning("Dropped task scheduled on %s: %s",
@@ -109,7 +113,7 @@ class Worker(Logger):
                 continue
             self.info("Trigger: %s -> %s", due_date, data)
             self._pending_tasks[task_id] = \
-                now, due_date, expire_in, timeout, data
+                now, due_date, expire_in, timeout, uid, data
             tasks.append(task_id)
         loop = asyncio.get_event_loop()
         task_aio_tasks = []
@@ -120,7 +124,7 @@ class Worker(Logger):
 
     @asyncio.coroutine
     def _trigger(self, task_id):
-        _, due_date, _, _, data = self._pending_tasks[task_id]
+        _, due_date, _, _, _, data = self._pending_tasks[task_id]
         props = dict(self.MESSAGE_PROPERTIES)
         props["reply_to"] = "amq.rabbitmq.reply-to"
         msg = task_id, due_date, data
@@ -244,10 +248,20 @@ class Worker(Logger):
             return
 
         self.debug("source <- [%s] %s", dtag, data)
-        expire_in = data.get("expire_in", None)
         timeout = data.get("timeout", None)
         if timeout is None:
             timeout = self._default_timeout
+        uid = data.get("id", None)
+        if uid is not None:
+            if not isinstance(uid, str) or len(uid) > 80:
+                self.error("%s: invalid unique_id: %s", dtag, uid)
+                yield from reply_error("invalid id value: must be str <= 80")
+                return
+            if uid in self._unique_tasks:
+                yield from reply({"status": "ok", "size": self._heap.size(),
+                                  "timeout": max(timeout, self._poll_interval),
+                                  "already_exists": True})
+        expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
             yield from reply_error("expire_in must be >=0 and <= 32767")
@@ -264,10 +278,12 @@ class Worker(Logger):
             yield from reply_error("due_date must be a datetime object")
             return
         task_id = yield from self._db_manager.register_task(
-            data, due_date, expire_in, timeout)
-        self._heap.push(due_date, (task_id, expire_in, timeout, data))
+            data, due_date, expire_in, timeout, uid)
+        self._heap.push(due_date, (uid, task_id, expire_in, timeout, data))
+        self._unique_tasks[uid] = task_id
         yield from reply({"status": "ok", "size": self._heap.size(),
-                          "timeout": max(timeout, self._poll_interval)})
+                          "timeout": max(timeout, self._poll_interval),
+                          "already_exists": False})
 
     @asyncio.coroutine
     def _amqp_callback_trigger(self, body, envelope, properties):
@@ -303,13 +319,16 @@ class Worker(Logger):
                 self.error("%s: %s is not a valid pending task identifier",
                            dtag, task_id)
             return
-        _, due_date, expire_in, timeout, data = \
+        _, due_date, expire_in, timeout, uid, data = \
             self._pending_tasks.pop(task_id)
         if status != "ok":
             self.warning("%s: task %s was reported to be in status %s",
                          dtag, task_id, status)
             if status != "giveup":
-                self._heap.push(due_date, (task_id, expire_in, timeout, data))
+                self._heap.push(
+                    due_date, (uid, task_id, expire_in, timeout, data))
                 return
+        if task_id in ~self._unique_tasks:
+            del self._unique_tasks[:task_id]
         yield from self._db_manager.unregister_task(task_id)
         self.info("%s: task %s was fulfilled by %s", dtag, task_id, node_id)
