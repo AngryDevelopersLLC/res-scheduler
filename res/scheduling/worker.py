@@ -46,6 +46,7 @@ class Worker(Logger):
         self._working = False
         self._heap = heap
         self._unique_tasks = bidict()
+        self._cancelled_tasks = set()
         self._cfg = cfg
         self._default_timeout = default_timeout
         self._poll_interval = poll_interval
@@ -110,6 +111,10 @@ class Worker(Logger):
                     (now - due_date) > timedelta(hours=expire_in):
                 self.warning("Dropped task scheduled on %s: %s",
                              due_date, data)
+                continue
+            if task_id in self._cancelled_tasks:
+                self._cancelled_tasks.remove(task_id)
+                self.info("Skipped cancelled task #%d", task_id)
                 continue
             self.info("Trigger: %s -> %s", due_date, data)
             self._pending_tasks[task_id] = \
@@ -248,6 +253,27 @@ class Worker(Logger):
             return
 
         self.debug("source <- [%s] %s", dtag, data)
+        try:
+            action = data["action"]
+        except KeyError:
+            yield from reply_error("no action was specified")
+            return
+        if action not in ("enqueue", "cancel"):
+            yield from reply_error("invalid action: %s", action)
+            return
+        if action == "cancel":
+            try:
+                task_id = int(data["id"])
+            except KeyError:
+                yield from reply_error("missing task id")
+                return
+            except ValueError:
+                yield from reply_error("invalid task id: %d", data["id"])
+                return
+            self._cancelled_tasks.add(task_id)
+            yield from self._db_manager.unregister_task(task_id)
+            yield from reply({"status": "ok"})
+            return
         timeout = data.get("timeout", None)
         if timeout is None:
             timeout = self._default_timeout
@@ -283,7 +309,7 @@ class Worker(Logger):
         self._unique_tasks[uid] = task_id
         yield from reply({"status": "ok", "size": self._heap.size(),
                           "timeout": max(timeout, self._poll_interval),
-                          "already_exists": False})
+                          "already_exists": False, "id": task_id})
 
     @asyncio.coroutine
     def _amqp_callback_trigger(self, body, envelope, properties):

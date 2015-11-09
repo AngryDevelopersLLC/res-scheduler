@@ -20,7 +20,11 @@ class DBManagerMock(object):
     @asyncio.coroutine
     def register_task(self, data, due_date, expires, timeout, uid):
         self.counter += 1
-        return "test_task_id%d" % self.counter
+        return self.counter
+
+    @asyncio.coroutine
+    def unregister_task(self, task_id):
+        pass
 
 
 class AMQPChannelMock(object):
@@ -69,29 +73,31 @@ class SchedulingAPITest(unittest.TestCase):
         def make_msg_bytes(msg):
             return json.dumps(msg, default=json_util.default).encode("utf-8")
 
-        msg = {"due_date": date, "data": "hello"}
+        msg = {"action": "enqueue", "due_date": date, "data": "hello"}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(1, worker._heap.size())
         self.assertEqual(date, worker._heap.min()[0])
         self.assertIsNone(worker._heap.min()[1][0])
-        self.assertEqual("test_task_id1", worker._heap.min()[1][1])
+        self.assertEqual(1, worker._heap.min()[1][1])
         self.assertEqual(None, worker._heap.min()[1][2])
         self.assertEqual("hello", worker._heap.min()[1][4])
         date -= timedelta(days=10)
-        msg = {"due_date": date, "data": "world", "id": "unique"}
+        msg = {"action": "enqueue", "due_date": date, "data": "world",
+               "id": "unique"}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
         self.assertEqual(2, worker._heap.size())
         self.assertEqual(date, worker._heap.min()[0])
         self.assertEqual("unique", worker._heap.min()[1][0])
-        self.assertEqual("test_task_id2", worker._heap.min()[1][1])
+        self.assertEqual(2, worker._heap.min()[1][1])
         self.assertEqual(None, worker._heap.min()[1][2])
         self.assertEqual("world", worker._heap.min()[1][4])
         date += timedelta(days=5)
-        msg = {"due_date": date, "data": "other", "expire_in": 1}
+        msg = {"action": "enqueue", "due_date": date, "data": "other",
+               "expire_in": 1}
         msg_data = make_msg_bytes(msg)
         yield from worker._amqp_callback_source(
             msg_data, EnvelopeMock(), PropertiesMock())
@@ -99,7 +105,7 @@ class SchedulingAPITest(unittest.TestCase):
         self.assertEqual("world", worker._heap.min()[1][4])
         self.assertEqual(date, worker._heap._list[2][0])
         self.assertIsNone(worker._heap._list[2][1][0])
-        self.assertEqual("test_task_id3", worker._heap._list[2][1][1])
+        self.assertEqual(3, worker._heap._list[2][1][1])
         self.assertEqual(1, worker._heap._list[2][1][2])
         self.assertEqual("other", worker._heap._list[2][1][4])
         tasks = worker._poll()
@@ -108,6 +114,20 @@ class SchedulingAPITest(unittest.TestCase):
         self.assertEqual(0, worker._heap.size())
         self.assertEqual(2, len(worker._amqp_channel_trigger.published))
         self.assertEqual(2, len(worker._pending_tasks))
+
+        msg = {"action": "enqueue", "due_date": date, "data": "hello"}
+        msg_data = make_msg_bytes(msg)
+        yield from worker._amqp_callback_source(
+            msg_data, EnvelopeMock(), PropertiesMock())
+        self.assertEqual(1, worker._heap.size())
+        msg = {"action": "cancel", "id": 4}
+        msg_data = make_msg_bytes(msg)
+        yield from worker._amqp_callback_source(
+            msg_data, EnvelopeMock(), PropertiesMock())
+        self.assertEqual(1, worker._heap.size())
+        self.assertIn(4, worker._cancelled_tasks)
+        tasks = worker._poll()
+        self.assertEqual(0, len(tasks))
 
 
 if __name__ == "__main__":
