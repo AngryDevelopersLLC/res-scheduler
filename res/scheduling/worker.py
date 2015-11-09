@@ -86,7 +86,6 @@ class Worker(Logger):
     def _poll(self):
         now = datetime.now(pytz.utc)
         self.debug("Poll at %s", now)
-        loop = asyncio.get_event_loop()
         tasks = []
         # Detect timed out tasks
         timed_out = []
@@ -274,10 +273,10 @@ class Worker(Logger):
             yield from self._db_manager.unregister_task(task_id)
             yield from reply({"status": "ok"})
             return
-        timeout = data.get("timeout", None)
+        timeout = data.get("timeout")
         if timeout is None:
             timeout = self._default_timeout
-        uid = data.get("id", None)
+        uid = data.get("id")
         if uid is not None:
             if not isinstance(uid, str) or len(uid) > 80:
                 self.error("%s: invalid unique_id: %s", dtag, uid)
