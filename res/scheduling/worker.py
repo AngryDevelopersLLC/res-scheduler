@@ -282,10 +282,11 @@ class Worker(Logger):
                 self.error("%s: invalid unique_id: %s", dtag, uid)
                 yield from reply_error("invalid id value: must be str <= 80")
                 return
-            if uid in self._unique_tasks:
+            task_id = self._unique_tasks.get(uid)
+            if task_id is not None:
                 yield from reply({"status": "ok", "size": self._heap.size(),
                                   "timeout": max(timeout, self._poll_interval),
-                                  "already_exists": True})
+                                  "already_exists": True, "id": task_id})
         expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
