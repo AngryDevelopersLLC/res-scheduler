@@ -1,0 +1,3 @@
+aioamqp==0.4.0
+pytz
+bidict~=0.9.0

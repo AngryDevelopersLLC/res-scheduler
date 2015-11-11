@@ -1,0 +1,17 @@
+[Unit]
+Description=RES Scheduling Service
+After=rabbitmq-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/usr/lib/python3/dist-packages
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=res.scheduling
+ExecStart=/usr/share/res/scheduling/run.sh
+OOMScoreAdjust=-1000
+
+[Install]
+WantedBy=multi-user.target
