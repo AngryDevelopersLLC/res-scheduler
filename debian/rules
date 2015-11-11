@@ -18,5 +18,5 @@ override_dh_install:
 	mkdir -p debian/res-scheduling/lib/systemd/system
 	cp res/scheduling/res_scheduling.service debian/res-scheduling/lib/systemd/system
 	mkdir -p debian/res-scheduling/etc/default/res
-	touch debian/res-scheduling/etc/default/res/scheduling
+	echo "SETTINGS=" > debian/res-scheduling/etc/default/res/scheduling
 	cp res/scheduling/settings/local.json.example debian/res-scheduling/etc/default/res/scheduling.json.example
