@@ -17,6 +17,7 @@ class DBManager(Logger):
             "scheduled_tasks", sa.MetaData(),
             sa.Column("id", sa.BigInteger(), primary_key=True),
             sa.Column("data", BYTEA()),
+            sa.Column("name", sa.String(length=80)),
             sa.Column("expire_in", sa.SmallInteger(), default=None),
             sa.Column("timeout", sa.SmallInteger(), default=None),
             sa.Column("due_date", sa.DateTime(timezone=True)))
