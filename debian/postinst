@@ -1,4 +1,5 @@
 #!/bin/sh -e
 
 pip3 install -r /usr/share/res/scheduling/requirements.txt
+systemctl daemon-reload
 service res_scheduling restart || true
