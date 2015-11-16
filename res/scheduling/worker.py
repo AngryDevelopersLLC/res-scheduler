@@ -85,7 +85,7 @@ class Worker(Logger):
 
     def _poll(self):
         now = datetime.now(pytz.utc)
-        self.debug("Poll at %s", now)
+        self.debug("Poll at %s - %d tasks", now, self._heap.size())
         tasks = []
         # Detect timed out tasks
         timed_out = []
@@ -287,6 +287,7 @@ class Worker(Logger):
                 yield from reply({"status": "ok", "size": self._heap.size(),
                                   "timeout": max(timeout, self._poll_interval),
                                   "already_exists": True, "id": task_id})
+                return
         expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
