@@ -34,7 +34,8 @@ class Worker(Logger):
     RECONNECT_INTERVAL = 1
     MAX_MESSAGE_SIZE = 65536
 
-    def __init__(self, db_manager, heap, cfg, poll_interval, default_timeout):
+    def __init__(self, db_manager, heap, cfg, poll_interval, default_timeout,
+                 pending):
         super(Worker, self).__init__()
         self._db_manager = db_manager
         self._amqp_transport = None
@@ -46,13 +47,16 @@ class Worker(Logger):
         self._working = False
         self._heap = heap
         self._unique_tasks = bidict()
+        for _, (uid, task_id, _, _, _) in heap:
+            if uid is not None:
+                self._unique_tasks[uid] = task_id
         self._cancelled_tasks = set()
         self._cfg = cfg
         self._default_timeout = default_timeout
         self._poll_interval = poll_interval
         self._poll_handle = None
         self._reconnect_amqp_task = None
-        self._pending_tasks = {}
+        self._pending_tasks = dict(pending)
         self._timed_out_tasks = set()
         self.info("Initial heap size: %d", heap.size())
 
@@ -128,7 +132,8 @@ class Worker(Logger):
 
     @asyncio.coroutine
     def _trigger(self, task_id):
-        _, due_date, _, _, _, data = self._pending_tasks[task_id]
+        triggered_at, due_date, _, _, _, data = self._pending_tasks[task_id]
+        yield from self._db_manager.trigger_task(task_id, triggered_at)
         props = dict(self.MESSAGE_PROPERTIES)
         props["reply_to"] = "amq.rabbitmq.reply-to"
         msg = task_id, due_date, data

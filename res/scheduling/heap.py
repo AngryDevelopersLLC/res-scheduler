@@ -21,3 +21,6 @@ class Heap(object):
 
     def min(self):
         return self._list[0]
+
+    def __iter__(self):
+        return iter(self._list)

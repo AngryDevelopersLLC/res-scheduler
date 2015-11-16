@@ -26,6 +26,10 @@ class DBManagerMock(object):
     def unregister_task(self, task_id):
         pass
 
+    @asyncio.coroutine
+    def trigger_task(self, task_id, triggered_at):
+        pass
+
 
 class AMQPChannelMock(object):
     def __init__(self):
@@ -64,7 +68,7 @@ class SchedulingAPITest(unittest.TestCase):
         heap = Heap()
         cfg = Config('test')
         worker = Worker(db_mamanger, heap, cfg, poll_interval=100500,
-                        default_timeout=100500)
+                        default_timeout=100500, pending=tuple())
         worker._amqp_channel_source = AMQPChannelMock()
         worker._amqp_channel_trigger = AMQPChannelMock()
         date = datetime.now(pytz.utc)

@@ -41,7 +41,8 @@ def main():
     heap = Heap()
     heap.initialize((yield from db_manager.fetch_all()))
     worker = Worker(db_manager, heap, r.amqp, r.scheduler.poll_interval,
-                    r.scheduler.timeout)
+                    r.scheduler.timeout,
+                    (yield from db_manager.fetch_pending()))
     yield from worker.initialize()
     yield from worker.work()
 
