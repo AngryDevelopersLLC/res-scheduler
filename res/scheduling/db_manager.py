@@ -16,11 +16,12 @@ class DBManager(Logger):
         self._tasks_table = sa.Table(
             "scheduled_tasks", sa.MetaData(),
             sa.Column("id", sa.BigInteger(), primary_key=True),
-            sa.Column("data", BYTEA()),
-            sa.Column("name", sa.String(length=80)),
+            sa.Column("data", BYTEA(), nullable=False),
+            sa.Column("name", sa.String(length=80), nullable=True,
+                      unique=True),
             sa.Column("expire_in", sa.SmallInteger(), default=None),
             sa.Column("timeout", sa.SmallInteger(), default=None),
-            sa.Column("due_date", sa.DateTime(timezone=True)))
+            sa.Column("due_date", sa.DateTime(timezone=True), nullable=False))
 
     @asyncio.coroutine
     def initialize(self):

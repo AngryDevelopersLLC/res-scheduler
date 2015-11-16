@@ -19,5 +19,5 @@ Package: res-scheduling
 Architecture: any
 Depends: ${misc:Depends}, ${python3:Depends},
  rabbitmq-server (>=3.4.0), systemd (>=219), res-core (=1.0.0)
-Description: RESystem Accounting Service
+Description: RESystem Scheduling Service
  Copyright © 2015 AO InvestGroup / Angry Developers team
