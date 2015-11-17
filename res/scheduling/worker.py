@@ -121,6 +121,13 @@ class Worker(Logger):
                 self._cancelled_tasks.remove(task_id)
                 self.info("Skipped cancelled task #%d", task_id)
                 continue
+            if task_id in self._pending_tasks:
+                if not self._pending_tasks[task_id][0]:
+                    self.error("Consistency failure: popped task is pending "
+                               "but was not restored from DB")
+                else:
+                    self.debug("Skipped pending restored task #%d")
+                continue
             self.info("Trigger: %s -> %s", due_date, data)
             self._pending_tasks[task_id] = \
                 False, now, due_date, expire_in, timeout, uid, data
