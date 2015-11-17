@@ -99,7 +99,10 @@ class DBManager(Logger):
     def fetch_pending(self):
         with (yield from self._engine) as conn:
             rows = yield from conn.execute(self._pending_table.join(
-                self._tasks_table).select())
+                self._tasks_table).select(use_labels=True))
             rows = yield from rows.fetchall()
-            return [(r.id, (r.triggered_at, r.due_date, r.expire_in,
-                            r.timeout, r.name, r.data)) for r in rows]
+            return [(r.scheduled_tasks_id,
+                     (r.pending_tasks_triggered_at, r.scheduled_tasks_due_date,
+                      r.scheduled_tasks_expire_in, r.scheduled_tasks_timeout,
+                      r.scheduled_tasks_name, r.scheduled_tasks_data))
+                    for r in rows]

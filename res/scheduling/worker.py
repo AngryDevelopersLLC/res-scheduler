@@ -58,7 +58,8 @@ class Worker(Logger):
         self._reconnect_amqp_task = None
         self._pending_tasks = dict(pending)
         self._timed_out_tasks = set()
-        self.info("Initial heap size: %d", heap.size())
+        self.info("Initial heap size: %d; pending tasks count: %d",
+                  heap.size(), len(self._pending_tasks))
 
     @asyncio.coroutine
     def initialize(self):

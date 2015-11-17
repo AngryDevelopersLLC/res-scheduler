@@ -22,20 +22,16 @@ res.core.argument_parser.ARGPARSE_DESCRIPTION = "RES Scheduling Service"
 @asyncio.coroutine
 def main():
     parser = gather_parsers(get_argument_parser(), (res.scheduling,))
-    parser.add_argument("--disable-logging-to-mongo", action="store_true")
     args = parser.parse_args()
     Logger.setup_logging()
     initialize_configuration()
     logger = logging.getLogger("main")
     loop = asyncio.get_event_loop()
     session_id = str(uuid.uuid4())
-    if not args.disable_logging_to_mongo:
-        try:
-            yield from Logger.duplicate_logs_to_mongo(
-                os.path.dirname(sys.modules["res"].__file__),
-                session_id, "main")
-        except:
-            logger.exception("Failed to setup logging to MongoDB")
+    try:
+        yield from Logger.duplicate_logs_to_mongo(session_id, "main")
+    except:
+        logger.exception("Failed to setup logging to MongoDB")
     db_manager = DBManager(**r.db)
     yield from db_manager.initialize()
     heap = Heap()

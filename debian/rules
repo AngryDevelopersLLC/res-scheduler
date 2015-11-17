@@ -19,4 +19,5 @@ override_dh_install:
 	cp res/scheduling/res_scheduling.service debian/res-scheduling/lib/systemd/system
 	mkdir -p debian/res-scheduling/etc/default/res
 	echo "SETTINGS=" > debian/res-scheduling/etc/default/res/scheduling
+	echo "EXTRA=--disable-logging-to-mongo" >> debian/res-scheduling/etc/default/res/scheduling
 	cp res/scheduling/settings/local.json.example debian/res-scheduling/etc/default/res/scheduling.json.example
