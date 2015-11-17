@@ -101,5 +101,5 @@ class DBManager(Logger):
             rows = yield from conn.execute(self._pending_table.join(
                 self._tasks_table).select())
             rows = yield from rows.fetchall()
-            return [(r.task_id, (r.triggered_at, r.due_date, r.expire_in,
-                                 r.timeout, r.name, r.data)) for r in rows]
+            return [(r.id, (r.triggered_at, r.due_date, r.expire_in,
+                            r.timeout, r.name, r.data)) for r in rows]
