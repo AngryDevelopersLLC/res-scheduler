@@ -102,7 +102,8 @@ class DBManager(Logger):
                 self._tasks_table).select(use_labels=True))
             rows = yield from rows.fetchall()
             return [(r.scheduled_tasks_id,
-                     (r.pending_tasks_triggered_at, r.scheduled_tasks_due_date,
-                      r.scheduled_tasks_expire_in, r.scheduled_tasks_timeout,
-                      r.scheduled_tasks_name, r.scheduled_tasks_data))
+                     (True, r.pending_tasks_triggered_at,
+                      r.scheduled_tasks_due_date, r.scheduled_tasks_expire_in,
+                      r.scheduled_tasks_timeout, r.scheduled_tasks_name,
+                      pickle.loads(r.scheduled_tasks_data)))
                     for r in rows]

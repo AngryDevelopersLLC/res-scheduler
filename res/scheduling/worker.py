@@ -94,11 +94,12 @@ class Worker(Logger):
         tasks = []
         # Detect timed out tasks
         timed_out = []
-        for task_id, (trigger_date, due_date, expire_in, timeout, uid, data) \
-                in self._pending_tasks.items():
+        for task_id, (restored, trigger_date, due_date, expire_in, timeout,
+                      uid, data) in self._pending_tasks.items():
             if now > (trigger_date + timedelta(seconds=timeout)):
-                self._heap.push(due_date, (uid, task_id, expire_in, timeout,
-                                           data))
+                if not restored:
+                    self._heap.push(due_date,
+                                    (uid, task_id, expire_in, timeout, data))
                 timed_out.append(task_id)
                 self._timed_out_tasks.add(task_id)
                 self.warning(
@@ -122,7 +123,7 @@ class Worker(Logger):
                 continue
             self.info("Trigger: %s -> %s", due_date, data)
             self._pending_tasks[task_id] = \
-                now, due_date, expire_in, timeout, uid, data
+                False, now, due_date, expire_in, timeout, uid, data
             tasks.append(task_id)
         loop = asyncio.get_event_loop()
         task_aio_tasks = []
@@ -133,7 +134,7 @@ class Worker(Logger):
 
     @asyncio.coroutine
     def _trigger(self, task_id):
-        triggered_at, due_date, _, _, _, data = self._pending_tasks[task_id]
+        _, triggered_at, due_date, _, _, _, data = self._pending_tasks[task_id]
         yield from self._db_manager.trigger_task(task_id, triggered_at)
         props = dict(self.MESSAGE_PROPERTIES)
         props["reply_to"] = "amq.rabbitmq.reply-to"
@@ -352,7 +353,7 @@ class Worker(Logger):
                 self.error("%s: %s is not a valid pending task identifier",
                            dtag, task_id)
             return
-        _, due_date, expire_in, timeout, uid, data = \
+        _, _, due_date, expire_in, timeout, uid, data = \
             self._pending_tasks.pop(task_id)
         if status != "ok":
             self.warning("%s: task %s was reported to be in status %s",
