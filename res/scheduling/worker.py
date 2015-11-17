@@ -351,8 +351,11 @@ class Worker(Logger):
         except KeyError as e:
             self.error("%s: invalid format: %s: %s", dtag, type(e), e)
             return
+        timed_out = task_id in self._timed_out_tasks
+        if timed_out:
+            self._timed_out_tasks.remove(task_id)
         if task_id not in self._pending_tasks:
-            if task_id in self._timed_out_tasks:
+            if timed_out:
                 self.error(
                     "Received status %s from timed out task %s from %s => "
                     "double trigger", status, task_id, node_id)
