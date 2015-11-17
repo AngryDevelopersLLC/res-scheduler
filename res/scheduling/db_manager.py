@@ -1,7 +1,7 @@
 import asyncio
 import pickle
 import aiopg.sa
-from psycopg2 import ProgrammingError
+from psycopg2 import ProgrammingError, IntegrityError
 import sqlalchemy as sa
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.dialects.postgresql import BYTEA
@@ -75,9 +75,16 @@ class DBManager(Logger):
     @asyncio.coroutine
     def trigger_task(self, task_id, triggered_at):
         with (yield from self._engine) as conn:
-            yield from conn.execute(
-                self._pending_table.insert()
-                .values(id=task_id, triggered_at=triggered_at))
+            try:
+                yield from conn.execute(
+                    self._pending_table.insert()
+                    .values(id=task_id, triggered_at=triggered_at))
+            except IntegrityError:
+                yield from conn.execute(
+                    self._pending_table.update()
+                    .where(self._pending_table.c.id == task_id)
+                    .values(triggered_at=triggered_at)
+                )
 
     @asyncio.coroutine
     def fetch_all(self):
