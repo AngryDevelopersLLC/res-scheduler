@@ -2,7 +2,6 @@ import asyncio
 import logging
 import signal
 import sys
-import os
 import uuid
 
 try:
@@ -13,6 +12,7 @@ except ImportError as e:
 from res.core.argument_parser import get_argument_parser, gather_parsers
 from res.core.configuration import initialize as initialize_configuration, r
 from res.core.logger import Logger
+from res.core.systemd_watchdog import install_watchdog
 from res.scheduling.db_manager import DBManager
 from res.scheduling.heap import Heap
 from res.scheduling.worker import Worker
@@ -32,6 +32,7 @@ def main():
         yield from Logger.duplicate_logs_to_mongo(session_id, "main")
     except:
         logger.exception("Failed to setup logging to MongoDB")
+    install_watchdog(r.watchdog.interval)
     db_manager = DBManager(**r.db)
     yield from db_manager.initialize()
     heap = Heap()
