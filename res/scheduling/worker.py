@@ -58,8 +58,9 @@ class Worker(Logger):
         self._reconnect_amqp_task = None
         self._pending_tasks = dict(pending)
         self._timed_out_tasks = set()
-        self.info("Initial heap size: %d; pending tasks count: %d",
-                  heap.size(), len(self._pending_tasks))
+        self.info("Initial heap size: %d; pending tasks count: %d; "
+                  "unique tasks count: %d", heap.size(),
+                  len(self._pending_tasks), len(self._unique_tasks))
 
     @asyncio.coroutine
     def initialize(self):
@@ -320,7 +321,13 @@ class Worker(Logger):
             return
         task_id = yield from self._db_manager.register_task(
             data, due_date, expire_in, timeout, uid)
-        self._heap.push(due_date, (uid, task_id, expire_in, timeout, data))
+        try:
+            self._heap.push(due_date, (uid, task_id, expire_in, timeout, data))
+        except Exception as e:
+            yield from self._db_manager.unregister_task(task_id)
+            self.error("%s: heap push failure: %s: %s", dtag, type(e), e)
+            yield from reply_error("heap push failure: %s: %s" % (type(e), e))
+            return
         self._unique_tasks[uid] = task_id
         yield from reply({"status": "ok", "size": self._heap.size(),
                           "timeout": max(timeout, self._poll_interval),
