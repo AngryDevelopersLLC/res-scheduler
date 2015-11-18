@@ -48,7 +48,7 @@ class Worker(Logger):
         self._heap = heap
         self._unique_tasks = bidict()
         for _, (uid, task_id, _, _, _) in heap:
-            if uid is not None:
+            if uid:
                 self._unique_tasks[uid] = task_id
         self._cancelled_tasks = set()
         self._cfg = cfg
@@ -303,6 +303,8 @@ class Worker(Logger):
                                   "timeout": max(timeout, self._poll_interval),
                                   "already_exists": True, "id": task_id})
                 return
+        else:
+            uid = ""
         expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
@@ -328,7 +330,8 @@ class Worker(Logger):
             self.error("%s: heap push failure: %s: %s", dtag, type(e), e)
             yield from reply_error("heap push failure: %s: %s" % (type(e), e))
             return
-        self._unique_tasks[uid] = task_id
+        if uid:
+            self._unique_tasks[uid] = task_id
         yield from reply({"status": "ok", "size": self._heap.size(),
                           "timeout": max(timeout, self._poll_interval),
                           "already_exists": False, "id": task_id})
