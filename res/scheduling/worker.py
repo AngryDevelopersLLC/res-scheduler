@@ -291,6 +291,15 @@ class Worker(Logger):
         timeout = data.get("timeout")
         if timeout is None:
             timeout = self._default_timeout
+        elif not isinstance(timeout, int):
+            self.error("%s: timeout must be an integer", dtag)
+            yield from reply_error("timeout must be an integer")
+            return
+        if timeout > 32767 or timeout < 1:
+            self.error("%s: timeout must be in [1, 32767] (got %d)", dtag,
+                       timeout)
+            yield from reply_error("timeout must be in [1, 32767]")
+            return
         uid = data.get("id")
         if uid is not None:
             if not isinstance(uid, str) or len(uid) > 80:

@@ -68,7 +68,7 @@ class SchedulingAPITest(unittest.TestCase):
         heap = Heap()
         cfg = Config('test')
         worker = Worker(db_mamanger, heap, cfg, poll_interval=100500,
-                        default_timeout=100500, pending=tuple())
+                        default_timeout=10050, pending=tuple())
         worker._amqp_channel_source = AMQPChannelMock()
         worker._amqp_channel_trigger = AMQPChannelMock()
         date = datetime.now(pytz.utc)
