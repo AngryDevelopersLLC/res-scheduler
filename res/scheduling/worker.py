@@ -37,6 +37,10 @@ class Worker(Logger):
     def __init__(self, db_manager, heap, cfg, poll_interval, default_timeout,
                  pending):
         super(Worker, self).__init__()
+        self._source_handler_map = {
+            "enqueue": self._source_handle_enqueue,
+            "cancel": self._source_handle_cancel,
+        }
         self._db_manager = db_manager
         self._amqp_transport = None
         self._amqp_protocol = None
@@ -263,31 +267,73 @@ class Worker(Logger):
             data = json.loads(body.decode("utf-8"), object_hook=json_hook)
         except ValueError:
             self.error("%s: failed to parse %s%s", dtag, *ellipsis(body))
-            yield from reply_error("failed to parse JSON")
+            yield from reply_error("%s: failed to parse JSON" % dtag)
             return
 
         self.debug("source <- [%s] %s", dtag, data)
         try:
             action = data["action"]
         except KeyError:
-            yield from reply_error("no action was specified")
+            self.error("%s: no action", dtag)
+            yield from reply_error("%s: no action was specified" % dtag)
             return
-        if action not in ("enqueue", "cancel"):
-            yield from reply_error("invalid action: %s", action)
+        try:
+            yield from self._source_handler_map[action](
+                data, dtag, reply, reply_error)
+        except KeyError:
+            self.error("%s: invalid action \"%s\"", dtag, action)
+            yield from reply_error("%s: invalid action: %s" % (dtag, action))
+        except Exception as e:
+            self.exception("%s: internal \"%s\" handler error", dtag, action)
+            yield from reply_error("%s: internal error: %s: %s" % (
+                dtag, type(e).__name__, e))
+            # the best thing we can do without further corruption is terminate
+            raise SystemExit()
+
+    @asyncio.coroutine
+    def _source_handle_cancel(self, data, dtag, reply, reply_error):
+        try:
+            task_id = int(data["id"])
+        except KeyError:
+            self.error("%s: missing task id", dtag)
+            yield from reply_error("%s: missing task id" % dtag)
             return
-        if action == "cancel":
-            try:
-                task_id = int(data["id"])
-            except KeyError:
-                yield from reply_error("missing task id")
+        except ValueError:
+            self.error("%s: invalid task id %s", dtag, data["id"])
+            yield from reply_error("%s: invalid task id: %s" % (
+                dtag, data["id"]))
+            return
+        self._cancelled_tasks.add(task_id)
+        yield from self._db_manager.unregister_task(task_id)
+        yield from reply({"status": "ok"})
+
+    @asyncio.coroutine
+    def _source_handle_enqueue(self, data, dtag, reply, reply_error):
+        uid = data.get("id")
+        if uid is not None:
+            if not isinstance(uid, str) or len(uid) > 80 or not uid:
+                self.error("%s: invalid unique id: %s", dtag, uid)
+                yield from reply_error("invalid id value: must be nonempty "
+                                       "str <= 80")
                 return
-            except ValueError:
-                yield from reply_error("invalid task id: %d", data["id"])
+            task_id = self._unique_tasks.get(uid)
+            if task_id is not None and isinstance(task_id, asyncio.Future):
+                task_id = yield from task_id
+            if task_id is not None:
+                yield from reply({"status": "ok", "size": self._heap.size(),
+                                  "already_exists": True, "id": task_id})
                 return
-            self._cancelled_tasks.add(task_id)
-            yield from self._db_manager.unregister_task(task_id)
-            yield from reply({"status": "ok"})
-            return
+            self._unique_tasks[uid] = asyncio.Future()
+        else:
+            uid = ""
+        result = yield from self._source_handle_enqueue_core(
+            data, uid, dtag, reply, reply_error)
+        if not result and uid:
+            self._unique_tasks[uid].set_result(None)
+            del self._unique_tasks[uid]
+
+    @asyncio.coroutine
+    def _source_handle_enqueue_core(self, data, uid, dtag, reply, reply_error):
         timeout = data.get("timeout")
         if timeout is None:
             timeout = self._default_timeout
@@ -300,20 +346,6 @@ class Worker(Logger):
                        timeout)
             yield from reply_error("timeout must be in [1, 32767]")
             return
-        uid = data.get("id")
-        if uid is not None:
-            if not isinstance(uid, str) or len(uid) > 80:
-                self.error("%s: invalid unique_id: %s", dtag, uid)
-                yield from reply_error("invalid id value: must be str <= 80")
-                return
-            task_id = self._unique_tasks.get(uid)
-            if task_id is not None:
-                yield from reply({"status": "ok", "size": self._heap.size(),
-                                  "timeout": max(timeout, self._poll_interval),
-                                  "already_exists": True, "id": task_id})
-                return
-        else:
-            uid = ""
         expire_in = data.get("expire_in", None)
         if expire_in is not None and (expire_in > 32767 or expire_in < 0):
             self.error("%s: expire_in must be >=0 and <= 32767", dtag)
@@ -340,10 +372,11 @@ class Worker(Logger):
             yield from reply_error("heap push failure: %s: %s" % (type(e), e))
             return
         if uid:
+            self._unique_tasks[uid].set_result(task_id)
             self._unique_tasks[uid] = task_id
         yield from reply({"status": "ok", "size": self._heap.size(),
-                          "timeout": max(timeout, self._poll_interval),
                           "already_exists": False, "id": task_id})
+        return True
 
     @asyncio.coroutine
     def _amqp_callback_trigger(self, body, envelope, properties):
