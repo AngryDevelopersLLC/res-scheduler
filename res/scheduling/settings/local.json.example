@@ -1,0 +1,40 @@
+{"db": {
+    "database": "res_scheduling",
+    "user": "user",
+    "password": "password",
+    "host": "127.0.0.1",
+    "port": 5432
+},
+"amqp": {
+    "connection": {
+        "virtualhost": "/res/scheduling",
+        "login": "user",
+        "password": "password",
+        "host": "127.0.0.1",
+        "port": 5672,
+        "management_port": 15672,
+        "timeout": 1
+    },
+    "channel": {
+        "queue_source": "enqueue",
+        "queue_trigger": "trigger",
+        "timeout": 10
+    }
+},
+"logs": {
+    "db": {
+        "db": "res_scheduling",
+        "user": "user",
+        "password": "password",
+        "host": "127.0.0.1",
+        "port": 27017
+    }
+},
+"scheduler": {
+    "poll_interval": 60,
+    "timeout": 30
+},
+"watchdog": {
+    "interval": 5
+}
+}

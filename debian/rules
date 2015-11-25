@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+
+export DH_VERBOSE=1
+export PYBUILD_NAME=res-scheduling
+export PYBUILD_DISABLE=test
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+
+override_dh_install:
+	dh_install
+	rm -f debian/res-scheduling/usr/lib/python3/dist-packages/res/__init__.py
+	mkdir -p debian/res-scheduling/usr/share/res/scheduling
+	cp requirements/base.txt debian/res-scheduling/usr/share/res/scheduling/requirements.txt
+	cp res/scheduling/run.sh README.md LICENSE debian/res-scheduling/usr/share/res/scheduling
+	chmod +x debian/res-scheduling/usr/share/res/scheduling/run.sh
+	mkdir -p debian/res-scheduling/lib/systemd/system
+	cp res/scheduling/res_scheduling.service debian/res-scheduling/lib/systemd/system
+	mkdir -p debian/res-scheduling/etc/default/res
+	echo "SETTINGS=" > debian/res-scheduling/etc/default/res/scheduling
+	echo "EXTRA=--disable-logging-to-mongo" >> debian/res-scheduling/etc/default/res/scheduling
+	cp res/scheduling/settings/local.json.example debian/res-scheduling/etc/default/res/scheduling.json.example

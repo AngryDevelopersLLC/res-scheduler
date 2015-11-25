@@ -1,0 +1,4 @@
+aioamqp==0.4.0
+pytz
+bidict~=0.9.0
+res-core==1.0.1
