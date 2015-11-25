@@ -1,4 +1,7 @@
-### Python template
+.pybuild
+debian/res-scheduling*
+debian/files
+local.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -58,4 +61,5 @@ docs/_build/
 # PyBuilder
 target/
 
-# Created by .ignore support plugin (hsz.mobi)
+.idea
+venv
