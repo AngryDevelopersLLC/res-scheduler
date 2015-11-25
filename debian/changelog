@@ -1,3 +1,9 @@
+res-scheduling (1.0.1) vivid wily; urgency=medium
+
+  * Public disclosure under BSD license
+
+ -- Markovtsev Vadim <gmarkhor@gmail.com>  Wed, 25 November 2015 12:00:00 +0300
+
 res-scheduling (1.0.0) vivid wily; urgency=medium
 
   * Initial release

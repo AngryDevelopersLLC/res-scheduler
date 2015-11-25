@@ -11,6 +11,7 @@ export PYBUILD_DISABLE=test
 
 override_dh_install:
 	dh_install
+	rm -f debian/res-scheduling/usr/lib/python3/dist-packages/res/__init__.py
 	mkdir -p debian/res-scheduling/usr/share/res/scheduling/service
 	cp res/scheduling/requirements/base.txt debian/res-scheduling/usr/share/res/scheduling/requirements.txt
 	cp res/scheduling/run.sh debian/res-scheduling/usr/share/res/scheduling

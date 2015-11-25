@@ -1,7 +1,7 @@
 Source: res-scheduling
 Section: python
 Priority: optional
-Maintainer: Angry Developers <gmarkhor@gmail.com>
+Maintainer: Angry Developers LLC <ceo@angrydev.ru>
 Uploaders: Vadim Markovtsev <gmarkhor@gmail.com>
 Build-Depends: debhelper (>= 8.1~),
                dh-python (>= 1.20131003-1~),
@@ -12,8 +12,8 @@ Build-Depends: debhelper (>= 8.1~),
                python3-all-dev (>= 3.4)
 Standards-Version: 3.9.5
 X-Python3-Version: >= 3.4.1
-Homepage: https://dev.res-it.net
-Vcs-Git: http://dev.res-it.net/gerrit/#/admin/projects/res-scheduler
+Homepage: https://github.com/AngryDevelopersLLC/res-scheduler
+Vcs-Git: https://github.com/AngryDevelopersLLC/res-scheduler
 
 Package: res-scheduling
 Architecture: any
