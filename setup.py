@@ -31,8 +31,7 @@ import os
 
 
 def parse_requirements():
-    path = os.path.join(os.path.dirname(__file__), "res", "scheduling",
-                        "requirements", "base.txt")
+    path = os.path.join(os.path.dirname(__file__), "requirements.txt")
     reqs = []
     with open(path, "r") as fin:
         for r in fin.read().split("\n"):
@@ -51,7 +50,7 @@ def parse_requirements():
 setup(
     name="res-scheduling",
     description="Resystem Scheduling Service",
-    version="1.0.0",
+    version="1.0.1",
     license="New BSD",
     author="Vadim Markovtsev",
     author_email="gmarkhor@gmail.com",
