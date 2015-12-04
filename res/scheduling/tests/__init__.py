@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Resystem Scheduling Service.
 Released under New BSD License.
