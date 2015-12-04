@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Resystem Scheduling Service.
 Released under New BSD License.
@@ -387,7 +388,7 @@ class Worker(Logger):
             yield from reply_error("due_date must be a datetime object")
             return
         task_id = yield from self._db_manager.register_task(
-            data, due_date, expire_in, timeout, uid)
+            data, due_date, expire_in, timeout, uid or None)
         try:
             self._heap.push(due_date, (uid, task_id, expire_in, timeout, data))
         except Exception as e:

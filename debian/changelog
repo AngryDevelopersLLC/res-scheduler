@@ -1,3 +1,9 @@
+res-scheduling (1.0.2) vivid wily; urgency=medium
+
+  * Fix scheduling non-unique tasks
+
+ -- Markovtsev Vadim <gmarkhor@gmail.com>  Fri, 4 December 2015 12:00:00 +0300
+
 res-scheduling (1.0.1) vivid wily; urgency=medium
 
   * Public disclosure under BSD license
