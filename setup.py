@@ -50,7 +50,7 @@ def parse_requirements():
 setup(
     name="res-scheduling",
     description="Resystem Scheduling Service",
-    version="1.0.1",
+    version="1.0.2",
     license="New BSD",
     author="Vadim Markovtsev",
     author_email="gmarkhor@gmail.com",
