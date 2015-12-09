@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-pip3 install -r /usr/share/res/scheduling/requirements.txt
+pip3 install -r /usr/share/res/scheduling/requirements.txt --process-dependency-links
 systemctl daemon-reload
 systemctl enable res_scheduling.service
 service res_scheduling restart || true
