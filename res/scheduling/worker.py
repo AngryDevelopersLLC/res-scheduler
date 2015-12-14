@@ -224,7 +224,8 @@ class Worker(Logger):
                   amqp_props["version"])
         self._amqp_channel_trigger = yield from self._amqp_protocol.channel()
         yield from asyncio.wait_for(self._amqp_channel_trigger.queue(
-            self._cfg.channel.queue_trigger, durable=False, auto_delete=True),
+            self._cfg.channel.queue_trigger, durable=False, auto_delete=True,
+            arguments={"x-message-ttl": 0}),
             timeout=self._cfg.channel.timeout)
         self.info("Successfully acquired the connection to trigger AMQP queue "
                   "%s (RabbitMQ %s)", self._cfg.channel.queue_trigger,
