@@ -120,7 +120,7 @@ class DBManager(Logger):
         with (yield from self._engine) as conn:
             rows = yield from conn.execute(self._tasks_table.select())
             rows = yield from rows.fetchall()
-            return [(r.due_date, (r.name, r.id, r.expire_in, r.timeout,
+            return [(r.due_date, (r.name or "", r.id, r.expire_in, r.timeout,
                                   pickle.loads(r.data)))
                     for r in rows]
 
